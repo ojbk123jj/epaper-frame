@@ -14,3 +14,4 @@ run() {
 }
 
 run test_fb_pack tests/host/test_fb_pack.c
+run test_patterns tests/host/test_patterns.c main/epd_patterns.c main/epd_text.c
