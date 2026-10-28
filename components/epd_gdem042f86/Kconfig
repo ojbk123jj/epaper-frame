@@ -1,0 +1,39 @@
+menu "EPaperFrame"
+
+config EPD_PIN_SCK
+    int "EPD SPI SCLK GPIO"
+    default 12
+
+config EPD_PIN_MOSI
+    int "EPD SPI MOSI GPIO"
+    default 11
+
+config EPD_PIN_CS
+    int "EPD chip select GPIO"
+    default 10
+
+config EPD_PIN_DC
+    int "EPD data/command GPIO"
+    default 13
+
+config EPD_PIN_RST
+    int "EPD reset GPIO"
+    default 14
+
+config EPD_PIN_BUSY
+    int "EPD busy GPIO"
+    default 21
+
+config EPD_SPI_CLOCK_HZ
+    int "EPD SPI clock (Hz)"
+    default 10000000
+
+config EPD_FB_IN_PSRAM
+    bool "Allocate frame buffer in PSRAM"
+    default n
+
+config EPD_AUTORUN
+    bool "Run test sequence on boot"
+    default y
+
+endmenu
