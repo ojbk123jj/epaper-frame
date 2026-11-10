@@ -26,14 +26,11 @@ config EPD_PIN_BUSY
 
 config EPD_SPI_CLOCK_HZ
     int "EPD SPI clock (Hz)"
-    default 10000000
+    range 100000 10000000
+    default 1000000
 
 config EPD_FB_IN_PSRAM
     bool "Allocate frame buffer in PSRAM"
     default n
-
-config EPD_AUTORUN
-    bool "Run test sequence on boot"
-    default y
 
 endmenu
