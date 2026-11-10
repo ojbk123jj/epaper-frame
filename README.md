@@ -95,18 +95,31 @@ ai
 
 覆盖像素打包、连续显示与固定 8 秒恢复保护、BUSY/SPI 故障、关电顺序，以及业务接口的帧长度验证、
 缓冲区复制、并发拒绝和错误返回；同时覆盖 PNG/JPEG 解码、透明背景、裁剪/四色转换、
-ModelScope 请求和响应解析、HTTP 下载上限、凭据隔离与重定向。这些模拟测试不替代云端和实屏验证。
+ModelScope 请求和响应解析、HTTP 下载上限、凭据隔离与重定向，以及云端客户端的提交、轮询、
+失败退出和总超时。这些模拟测试不替代云端和实屏验证。
 
 ## 代码结构
 
-- `main/ai_service.c`：单任务生图到显示的业务流程。
-- `main/ai_network.c`、`main/ai_http.c`：Wi-Fi、校时、HTTPS 与下载。
-- `main/modelscope_protocol.c`：生图请求构造与异步任务响应解析。
-- `main/image_decode.c`、`main/image_convert.c`：PNG/JPEG 解码、裁剪与四色量化。
-- `main/ai_console.c`：串口提示词和状态查询。
-- `main/epaper_display.c`：业务图像提交接口和互斥保护。
-- `components/epd_gdem042f86/`：面板驱动与固定刷新保护。
-- `tests/host/`：离线回归。
-- `Docs/`：面板/IC 规格书与厂家参考例程。
+`main/` 只保留 `main.c` 和 `CMakeLists.txt`，负责初始化、组装组件和触发启动生成。
+功能实现按 ESP-IDF 组件组织，每个组件的 `include/` 提供公开接口，`src/` 存放实现。
+
+| 组件 | 职责 | 依赖的业务组件 |
+|---|---|---|
+| `app_config` | 默认配置与本地配置入口、生成缺失的本地配置模板 | 无 |
+| `ai_console` | 串口提示词输入、任务提交和状态展示 | `ai_service`、`app_config` |
+| `ai_service` | 单任务队列、状态管理、协调生图到显示 | 云端客户端、联网、图像处理、显示、配置 |
+| `modelscope_client` | HTTPS 鉴权、请求构造、提交、轮询和图片下载 | `app_config` |
+| `network_service` | Wi-Fi 连接、SNTP 校时、停止 Wi-Fi | `app_config` |
+| `image_processing` | PNG/JPEG 解码、裁剪缩放、四色抖动及面板格式打包 | `epd_gdem042f86` 的尺寸和像素打包定义 |
+| `epaper_display` | 业务帧校验、互斥、缓冲区复制和显示结果 | `epd_gdem042f86` |
+| `epd_gdem042f86` | SPI/GPIO、面板时序、BUSY 检查和固定 8 秒恢复保护 | 无 |
+
+`modelscope_client/private_include/` 内的 HTTP 和协议解析头文件只供组件内部使用，
+业务层只调用 `modelscope_client.h`，不直接操作任务 ID、HTTP 头或 JSON 响应。
+联网和图像处理组件不调用显示接口，由 `ai_service` 负责协调资源释放和执行顺序。
+每个组件在自身 `CMakeLists.txt` 声明依赖，内部依赖使用 `PRIV_REQUIRES`。
+
+Wi-Fi 和 Token 继续在 `config/local_config.h` 配置；移动组件不会覆盖已有配置。
+`tests/host/` 存放离线回归，`Docs/` 保留面板/IC 规格书与厂家参考例程。
 
 图像解码器使用 vendored stb_image，仅启用 PNG/JPEG；版本和许可见 `third_party/stb/README.md`。

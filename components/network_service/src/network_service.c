@@ -1,4 +1,4 @@
-#include "ai_network.h"
+#include "network_service.h"
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -90,7 +90,7 @@ fail:
     return err;
 }
 
-esp_err_t ai_network_prepare(void)
+esp_err_t network_service_prepare(void)
 {
     if (!strlen(APP_WIFI_SSID) || strlen(APP_WIFI_SSID) > 32 || strlen(APP_WIFI_PASSWORD) > 63) {
         return ESP_ERR_INVALID_ARG;
@@ -107,7 +107,7 @@ esp_err_t ai_network_prepare(void)
     }
     EventBits_t bits = xEventGroupWaitBits(s_events, CONNECTED | FAILED, pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
     if (!(bits & CONNECTED)) {
-        ESP_LOGE("ai_network", "Wi-Fi connection failed; check SSID, password and 2.4GHz network");
+        ESP_LOGE("network_service", "Wi-Fi connection failed; check SSID, password and 2.4GHz network");
         return bits & FAILED ? ESP_FAIL : ESP_ERR_TIMEOUT;
     }
     time_t now = time(NULL);
@@ -120,14 +120,14 @@ esp_err_t ai_network_prepare(void)
         }
         err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(20000));
         if (err != ESP_OK || time(NULL) < 1735689600) {
-            ESP_LOGE("ai_network", "time synchronization failed; HTTPS requires a valid clock");
+            ESP_LOGE("network_service", "time synchronization failed; HTTPS requires a valid clock");
             return ESP_ERR_TIMEOUT;
         }
     }
     return ESP_OK;
 }
 
-esp_err_t ai_network_suspend(void)
+esp_err_t network_service_suspend(void)
 {
     atomic_store(&s_connect_enabled, false);
     if (!s_started) return ESP_OK;

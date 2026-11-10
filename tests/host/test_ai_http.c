@@ -4,7 +4,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../../main/ai_http.c"
+#include "../../components/modelscope_client/src/ai_http.c"
 
 typedef struct {
     int status;
