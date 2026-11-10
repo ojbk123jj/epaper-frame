@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../../main/epaper_display.c"
+#include "../../components/epaper_display/src/epaper_display.c"
 
 struct display_test_mutex { bool locked; };
 struct epd_dev { uint8_t frame[EPD_FB_SIZE]; };

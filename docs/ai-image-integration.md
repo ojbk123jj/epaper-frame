@@ -3,6 +3,11 @@
 已实现 ESP32 直接调用魔搭 ModelScope 的 API-Inference，默认模型 `Qwen/Qwen-Image`。
 启动生成一张，之后通过 UART 串口输入提示词。无需手机或中转服务器。
 
+实现按 ESP-IDF 组件划分：`ai_console` 接收提示词，`ai_service` 协调任务流程，
+`modelscope_client` 封装云端请求与轮询，`network_service` 管理联网和校时，
+`image_processing` 处理图像，`epaper_display` 提交显示，`epd_gdem042f86` 驱动面板。
+`main` 只负责初始化和启动任务，组件接口与依赖见 [代码结构](../README.md#代码结构)。
+
 ## 本地配置
 
 在 `config/local_config.h` 填写 Wi-Fi 名称、密码和 Access Token，重新编译并烧录。

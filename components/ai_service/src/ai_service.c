@@ -1,19 +1,16 @@
 #include "ai_service.h"
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "app_config.h"
-#include "ai_http.h"
-#include "ai_network.h"
+#include "modelscope_client.h"
+#include "network_service.h"
 #include "epaper_display.h"
 #include "image_convert.h"
 #include "image_decode.h"
-#include "modelscope_protocol.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -53,52 +50,23 @@ static void stage(ai_stage_t value)
 
 static esp_err_t generate_and_display(const char *prompt)
 {
-    char *body = NULL, *request = NULL, *image_url = NULL;
+    char *image_url = NULL;
     uint8_t *compressed = NULL, *rgb = NULL, *frame = NULL;
     size_t length = 0;
     int width = 0, height = 0;
     stage(AI_CONNECTING);
-    esp_err_t err = ai_network_prepare();
+    esp_err_t err = network_service_prepare();
     if (err != ESP_OK) goto done;
 
     stage(AI_GENERATING);
-    request = modelscope_request_json(APP_AI_MODEL, prompt, APP_AI_SIZE);
-    if (!request) { err = ESP_ERR_NO_MEM; goto done; }
-    int64_t deadline = esp_timer_get_time() + (int64_t)APP_AI_TIMEOUT_MS * 1000;
-    /* A submission is never automatically retried: it may create a second paid task. */
-    err = ai_http_api("https://api-inference.modelscope.cn/v1/images/generations",
-                      request, NULL, 30000, &body, &length);
-    free(request); request = NULL;
+    err = modelscope_generate_image(prompt, &image_url);
     if (err != ESP_OK) goto done;
-    char task_id[MODELSCOPE_TASK_ID_SIZE];
-    err = modelscope_parse_submit(body, length, task_id);
-    free(body); body = NULL;
-    if (err != ESP_OK) goto done;
-    char task_url[256];
-    snprintf(task_url, sizeof(task_url), "https://api-inference.modelscope.cn/v1/tasks/%s", task_id);
-    for (;;) {
-        int64_t remaining = deadline - esp_timer_get_time();
-        if (remaining <= 0) { err = ESP_ERR_TIMEOUT; goto done; }
-        uint32_t wait_ms = remaining > 5000000 ? 5000 : (uint32_t)((remaining + 999) / 1000);
-        vTaskDelay(pdMS_TO_TICKS(wait_ms) + 1);
-        remaining = deadline - esp_timer_get_time();
-        if (remaining <= 0) { err = ESP_ERR_TIMEOUT; goto done; }
-        uint32_t timeout_ms = remaining > 30000000 ? 30000 : (uint32_t)((remaining + 999) / 1000);
-        err = ai_http_api(task_url, NULL, "image_generation", timeout_ms, &body, &length);
-        if (err != ESP_OK) goto done;
-        modelscope_task_state_t state;
-        err = modelscope_parse_task(body, length, &state, &image_url);
-        free(body); body = NULL;
-        if (err != ESP_OK) goto done;
-        if (state == MODELSCOPE_FAILED) { err = ESP_FAIL; goto done; }
-        if (state == MODELSCOPE_SUCCEEDED) break;
-    }
 
     stage(AI_DOWNLOADING);
-    err = ai_http_download(image_url, &compressed, &length);
+    err = modelscope_download_image(image_url, &compressed, &length);
     if (err != ESP_OK) goto done;
     /* No radio transmissions while the panel booster/waveform is active. */
-    err = ai_network_suspend();
+    err = network_service_suspend();
     if (err != ESP_OK) goto done;
     stage(AI_CONVERTING);
     err = image_decode_rgb(compressed, length, &rgb, &width, &height);
@@ -112,8 +80,8 @@ static esp_err_t generate_and_display(const char *prompt)
     stage(AI_DISPLAYING);
     err = epaper_display_show(frame, EPD_FB_SIZE, APP_AI_FAST_REFRESH ? EPD_MODE_FAST : EPD_MODE_FULL);
 done:
-    ai_network_suspend();
-    free(body); free(request); free(image_url);
+    network_service_suspend();
+    free(image_url);
     free(compressed); free(rgb); free(frame);
     return err;
 }
