@@ -12,6 +12,9 @@ typedef enum {
     EPD_MODE_FAST = 1, /* 规格书 12s 快刷 */
 } epd_mode_t;
 
+/* 本板固定恢复间隔；由驱动补足两次操作之间尚未经过的时间。 */
+#define EPD_RECOVERY_INTERVAL_MS 8000U
+
 typedef struct {
     int pin_sck;
     int pin_mosi;
@@ -37,10 +40,8 @@ uint8_t *epd_fb(epd_handle_t h);
 void epd_fb_fill(epd_handle_t h, epd_color_t c);
 void epd_fb_set_px(epd_handle_t h, int x, int y, epd_color_t c);
 
-/* 一次完整事务：复位 -> 初始化 -> 写帧 -> 刷新 -> 休眠 */
+/* 一次完整事务：复位 -> 初始化 -> 写帧 -> 刷新 -> 关电/休眠 -> 保持复位。
+ * 下一次事务满足最小恢复间隔，并保持 RST 低电平至少 1000ms，再释放并初始化。 */
 esp_err_t epd_refresh(epd_handle_t h, epd_mode_t mode, uint32_t *elapsed_ms);
+/* 完成关电/休眠后保持 RST 低；重复调用成功返回，故障保持复位时返回 INVALID_STATE。 */
 esp_err_t epd_sleep(epd_handle_t h);
-
-int epd_busy_level(epd_handle_t h);
-esp_err_t epd_set_clock(epd_handle_t h, int clock_hz);
-int epd_clock_hz(epd_handle_t h);
