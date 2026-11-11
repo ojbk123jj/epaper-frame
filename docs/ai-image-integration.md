@@ -3,7 +3,7 @@
 已实现 ESP32 直接调用魔搭 ModelScope 的 API-Inference，默认模型 `Qwen/Qwen-Image`。
 启动生成一张，之后通过 UART 串口输入提示词。无需手机或中转服务器。
 
-实现按 ESP-IDF 组件划分：`ai_console` 接收提示词，`ai_service` 协调任务流程，
+实现按 ESP-IDF 组件划分：`ai_console` 接收提示词，`ai_service` 保留串口入口，`frame_service` 协调 AI/BLE 共享任务流程，
 `modelscope_client` 封装云端请求与轮询，`network_service` 管理联网和校时，
 `image_processing` 处理图像，`epaper_display` 提交显示，`epd_gdem042f86` 驱动面板。
 `main` 只负责初始化和启动任务，组件接口与依赖见 [代码结构](../README.md#代码结构)。
@@ -52,7 +52,7 @@ Token 不加 `Bearer ` 前缀，不在串口打印。Wi-Fi 使用 2.4GHz，密�
    `X-ModelScope-Task-Type: image_generation`。总生图等待上限 5 分钟，成功状态为 `SUCCEED`。
 5. `downloading`：下载 `output_images[0]`。只接受 HTTPS，最多跟随 3 次绝对 HTTPS 重定向。
    下载请求不携带 ModelScope Token；响应累计最多 2MiB。
-6. 下载后停止 Wi-Fi。`converting`：PNG/JPEG 解码到 PSRAM，透明背景合成白色，
+6. 下载后停止 Wi-Fi，刷屏前停止并反初始化 BLE 控制器，完成后重建服务并恢复广播。`converting`：PNG/JPEG 解码到 PSRAM，透明背景合成白色，
    居中裁剪为 4:3，最近邻缩放到 400×300，通过 Floyd–Steinberg 抖动量化为黑白黄红。
 7. `displaying`：提交 30,000 字节 2bpp 数据给 `epaper_display_show()`。
    保留固定 8 秒恢复保护及完整 BUSY 周期检查，默认全刷。

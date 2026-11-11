@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e9eef2">
+  <meta name="description" content="在手机上裁剪照片、预览四色效果，通过蓝牙更新 EPaperFrame 墨水屏相框。">
+  <title>EPaperFrame · 相框工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='4' fill='%23243443'/%3E%3Cpath fill='white' d='M7 7h18v18H7z'/%3E%3Ccircle cx='19' cy='13' r='4' fill='%23e9bd27'/%3E%3Cpath d='m8 24 8-10 8 10' fill='%23bd303c'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="EPaperFrame 首页"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>EPaperFrame</a>
+    <span class="topbar-label">相框工作台</span>
+    <a class="help-link" href="#guide">使用说明</a>
+  </header>
+  <main>
+    <div class="intro"><div><h1>给相框换张画。</h1><p>选一张喜欢的照片，看看它在四色纸上的模样。</p></div><span class="local-note"><span aria-hidden="true">●</span> 图片留在你的手机上</span></div>
+    <div class="workspace">
+      <section class="preview-panel" aria-label="图片预览">
+        <div class="preview-header"><h2>画面预览</h2><div class="view-switch" role="group" aria-label="预览模式"><button id="view-frame" aria-pressed="true">四色效果</button><button id="view-original" aria-pressed="false">原图构图</button></div></div>
+        <div class="preview-stage"><div class="physical-frame"><div class="mat"><canvas id="preview" width="400" height="300" aria-label="相框画面预览"></canvas></div></div><div class="frame-foot"><span>400 × 300 像素</span><span class="swatches" aria-label="黑、白、黄、红四色"><i></i><i></i><i></i><i></i></span></div></div>
+        <div class="preview-caption"><div><strong id="image-name">窗边的花</strong><span id="image-meta">示例画面 · 可以先试试调整效果</span></div><button id="download" class="text-button">保存屏幕帧</button></div>
+        <p class="preview-note">预览用于检查构图与四色分布，实际屏幕颜色会有所不同。</p>
+      </section>
+      <section class="editor" aria-label="换图操作">
+        <div class="editor-section">
+          <h2><span class="step">1</span>选择图片</h2>
+          <label class="upload" id="drop-zone" for="file"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-7 5 8"/></svg><strong>从相册选择照片</strong><span>也可以把图片拖到这里</span><input id="file" type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <p class="hint">支持 JPG、PNG、WebP，最大 20 MB。</p>
+        </div>
+        <fieldset class="editor-section" id="adjustments">
+          <legend class="sr-only">调整图片</legend><div class="section-title"><h2><span class="step">2</span>调整画面</h2><button class="text-button" id="reset" type="button">重置</button></div>
+          <label class="slider-label" for="zoom">放大裁剪<output id="zoom-value">1.0×</output></label><input id="zoom" type="range" min="1" max="3" value="1" step="0.05">
+          <div class="position-controls"><div><label class="slider-label" for="position-x">左右位置</label><input id="position-x" type="range" min="0" max="100" value="50"></div><div><label class="slider-label" for="position-y">上下位置</label><input id="position-y" type="range" min="0" max="100" value="50"></div></div>
+          <label class="toggle-row" for="dither"><span><strong>保留明暗细节</strong><small>用细小色点表现照片层次</small></span><input id="dither" type="checkbox" role="switch" checked></label>
+        </fieldset>
+        <div class="editor-section send-section">
+          <h2><span class="step">3</span>发送到相框</h2>
+          <div id="compatibility" class="notice" hidden></div>
+          <div class="device-row"><span class="device-dot" id="device-dot"></span><div><strong id="device-name">尚未连接相框</strong><span id="device-detail">打开蓝牙，将手机放在相框附近</span></div><button id="connect" class="secondary-button">连接相框</button></div>
+          <button id="send" class="primary-button" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 15V9m-3 3 3-3 3 3"/></svg><span id="send-label">发送到相框</span></button>
+          <div class="transfer" id="transfer" hidden><div><span id="progress-label">准备传输</span><span id="progress-value">0%</span></div><progress id="progress" value="0" max="30000" aria-label="图片传输进度"></progress></div>
+          <div class="status-message" id="message" role="status" aria-live="polite">连接后即可发送。刷屏约需 20 秒，请保持页面打开。</div>
+          <button id="refresh" class="text-button" hidden>查询相框状态</button>
+        </div>
+      </section>
+    </div>
+    <details id="guide" class="guide"><summary>第一次使用？查看连接与显示说明</summary><div><p>请用 Android 的 Chrome 浏览器，通过 HTTPS 打开此页面。点击“连接相框”，在系统弹窗中选择 EPaperFrame；取消选择不会修改相框。</p><p>发送前请先烧录本项目的 BLE 固件。接收完成后，相框会暂时关闭蓝牙进行刷屏，页面会自动尝试重连查询结果。等待期间请保持手机在附近、页面处于前台。</p><p>“保存屏幕帧”导出的是供相框使用的 30,000 字节数据文件。照片只在浏览器本地处理，不会上传到服务器。此原型尚未限制附近其他用户连接相框。</p></div></details>
+  </main>
+  <footer><span>EPaperFrame</span><span>黑、白、黄、红。让照片慢下来。</span></footer>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

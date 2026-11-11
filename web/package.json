@@ -1,0 +1,6 @@
+{
+  "name": "epaper-frame-web",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test tests/*.test.js", "build": "node build.mjs", "dev": "python3 -m http.server 8080 --bind 127.0.0.1"}
+}
