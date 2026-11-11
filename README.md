@@ -2,6 +2,31 @@
 
 ESP32-S3-WROOM-1-N16R8 + GDEM042F86 四色墨水屏（400×300，SSD2683ZA）。
 
+## Android 网页 BLE 换图原型
+
+新增 `web/` 静态网站：本地选图、裁剪缩放、四色预览与抖动、导出面板帧，
+通过 Chrome for Android 的 Web Bluetooth 将 30KB 图像直接发送到附近相框。
+网页可部署到自己的 HTTPS 服务器，照片不上传服务器；无需 Wi-Fi 或云 Token 即可换图。
+
+当前原型地址：[https://lumicat.top:8443/](https://lumicat.top:8443/)，原 IP 地址仍可访问。
+
+```bash
+npm --prefix web test
+npm --prefix web run dev
+npm --prefix web run build
+```
+
+BLE 固件采用独立构建配置，避免沿用未启用蓝牙的旧 `sdkconfig`：
+
+```bash
+idf.py -B build-ble -D SDKCONFIG=sdkconfig.ble build
+idf.py -B build-ble -D SDKCONFIG=sdkconfig.ble -p /dev/ttyUSB0 flash monitor
+```
+
+AI 生图与 BLE 收图共享一个任务槽。刷屏时暂时断开 BLE，完成后网页重连查询结果。
+部署说明、调试配置和实机验证清单见 [网页换图说明](docs/ble-web.md)，
+App 可复用的字段定义见 [BLE 协议](docs/ble-protocol.md)。
+
 ## AI 生图与烧录
 
 已接入 ESP32 直接调用魔搭 ModelScope 的 `Qwen/Qwen-Image`：联网、校时、异步生图、
@@ -24,8 +49,8 @@ Token 直接填原值，不加 `Bearer ` 前缀。该文件已加入 Git 忽略�
 
 ```bash
 . /home/miaojianyu/esp/ESP_IDF/esp_idf_5.5/esp-idf/export.sh
-idf.py build
-idf.py -p /dev/ttyUSB0 flash monitor
+idf.py -B build-ble -D SDKCONFIG=sdkconfig.ble build
+idf.py -B build-ble -D SDKCONFIG=sdkconfig.ble -p /dev/ttyUSB0 flash monitor
 ```
 
 将串口路径改为实际设备。ESP-IDF v5.5.5，16MB Flash，8MB Octal PSRAM，
@@ -63,7 +88,7 @@ ai
 - 调用阻塞到刷新和关电完成，应从业务任务调用，不能从中断或网络事件回调直接调用。
 - PNG/JPEG 解码、缩放和四色量化由上层完成，此接口只接收面板格式数据。
 
-显示操作由独立 AI 业务任务调用，串口输入在生图和刷屏期间保持可用。
+显示操作由共享图片工作任务调用，串口输入在生图和刷屏期间保持可用。
 
 ## 刷新保护
 
@@ -107,7 +132,10 @@ ModelScope 请求和响应解析、HTTP 下载上限、凭据隔离与重定向�
 |---|---|---|
 | `app_config` | 默认配置与本地配置入口、生成缺失的本地配置模板 | 无 |
 | `ai_console` | 串口提示词输入、任务提交和状态展示 | `ai_service`、`app_config` |
-| `ai_service` | 单任务队列、状态管理、协调生图到显示 | 云端客户端、联网、图像处理、显示、配置 |
+| `ai_service` | 保留串口 AI 接口，适配共享任务和状态 | `frame_service` |
+| `frame_service` | AI/BLE 共享任务所有权、接收预留、帧复制和刷新工作任务 | 云端客户端、联网、图像处理、显示、配置 |
+| `frame_transfer` | 可主机测试的二进制接收状态机、长度/偏移/CRC/超时校验 | 无 |
+| `ble_image` | NimBLE GATT、接收超时、断连清理与刷屏前后无线管理 | `frame_service`、`frame_transfer` |
 | `modelscope_client` | HTTPS 鉴权、请求构造、提交、轮询和图片下载 | `app_config` |
 | `network_service` | Wi-Fi 连接、SNTP 校时、停止 Wi-Fi | `app_config` |
 | `image_processing` | PNG/JPEG 解码、裁剪缩放、四色抖动及面板格式打包 | `epd_gdem042f86` 的尺寸和像素打包定义 |
@@ -116,7 +144,7 @@ ModelScope 请求和响应解析、HTTP 下载上限、凭据隔离与重定向�
 
 `modelscope_client/private_include/` 内的 HTTP 和协议解析头文件只供组件内部使用，
 业务层只调用 `modelscope_client.h`，不直接操作任务 ID、HTTP 头或 JSON 响应。
-联网和图像处理组件不调用显示接口，由 `ai_service` 负责协调资源释放和执行顺序。
+联网和图像处理组件不调用显示接口，由 `frame_service` 负责协调资源释放和执行顺序。
 每个组件在自身 `CMakeLists.txt` 声明依赖，内部依赖使用 `PRIV_REQUIRES`。
 
 Wi-Fi 和 Token 继续在 `config/local_config.h` 配置；移动组件不会覆盖已有配置。
