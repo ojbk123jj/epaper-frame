@@ -1,7 +1,11 @@
 build/
+build-ble/
+sdkconfig.ble
+sdkconfig.ble.old
 sdkconfig
 sdkconfig.old
 managed_components/
 .vscode/
 *.log
 config/local_config.h
+web/dist/

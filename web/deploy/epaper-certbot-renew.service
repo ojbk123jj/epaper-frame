@@ -1,0 +1,7 @@
+[Unit]
+Description=Renew EPaperFrame IP and domain HTTPS certificates
+After=network-online.target nginx.service
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/opt/epaper-certbot/bin/certbot renew --quiet --deploy-hook /usr/local/sbin/epaper-nginx-reload

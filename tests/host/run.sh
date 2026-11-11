@@ -18,6 +18,18 @@ run() {
 }
 
 run test_fb_pack tests/host/test_fb_pack.c
+run test_frame_transfer -I components/frame_transfer/include tests/host/test_frame_transfer.c components/frame_transfer/src/frame_transfer.c
+run test_ble_policy -I components/ble_image/private_include -I components/frame_transfer/include \
+    tests/host/test_ble_policy.c components/ble_image/src/radio_lifecycle.c components/ble_image/src/ble_policy.c
+run test_frame_service -DAPP_CONFIG_NO_LOCAL -I components/frame_service/include \
+    -I "$INC_DISPLAY" -I "$INC_IMAGE" -I "$INC_MODELSCOPE" -I "$INC_CONFIG" \
+    -I components/network_service/include -I tests/host/service_stubs -I tests/host/epd_stubs \
+    tests/host/test_frame_service.c components/frame_service/src/frame_service.c
+run test_frame_service_ai -DAPP_CONFIG_NO_LOCAL '-DAPP_WIFI_SSID="host"' '-DAPP_MODELSCOPE_TOKEN="host"' \
+    -I components/frame_service/include -I "$INC_DISPLAY" -I "$INC_IMAGE" \
+    -I "$INC_MODELSCOPE" -I "$INC_CONFIG" -I components/network_service/include \
+    -I tests/host/service_stubs -I tests/host/epd_stubs \
+    tests/host/test_frame_service.c components/frame_service/src/frame_service.c
 run test_epd_safety -I tests/host/epd_stubs tests/host/test_epd_safety.c
 run test_display -I "$INC_DISPLAY" -I tests/host/display_stubs -I tests/host/epd_stubs tests/host/test_display.c
 run test_ai_images -I "$INC_IMAGE" -I tests/host/epd_stubs -I third_party/stb \
