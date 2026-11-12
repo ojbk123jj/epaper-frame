@@ -72,7 +72,7 @@ Token 不加 `Bearer ` 前缀，不在串口打印。Wi-Fi 使用 2.4GHz，密�
 
 ## 网页与串口测试
 
-网页流程见 [网页换图说明](ble-web.md)。串口调试仍可输入：
+网页流程见独立仓库 [epaper-web](https://github.com/ojbk123jj/epaper-web) 的 `docs/ble-web.md`。串口调试仍可输入：
 
 ```text
 ai status

@@ -2,20 +2,16 @@
 
 ESP32-S3-WROOM-1-N16R8 + GDEM042F86 四色墨水屏（400×300，SSD2683ZA）。
 
-## Android 网页 BLE 换图原型
+## Web 客户端
 
-新增 `web/` 静态网站：本地选图、裁剪缩放、四色预览与抖动、导出面板帧，
-通过 Chrome for Android 的 Web Bluetooth 将 30KB 图像直接发送到附近相框；
-也可以在同一页面输入 AI 提示词，由相框自行联网生成、刷屏并回读四色预览。
-网页可部署到自己的 HTTPS 服务器，照片不上传服务器；仅 AI 提示词由相框发送到 ModelScope。
+网页换图与 AI 生图客户端已拆分到独立仓库维护：
 
-当前原型地址：[https://lumicat.top:8443/](https://lumicat.top:8443/)，原 IP 地址仍可访问。
+- https://github.com/ojbk123jj/epaper-web
+- 本地路径：`../epaper-web`
 
-```bash
-npm --prefix web test
-npm --prefix web run dev
-npm --prefix web run build
-```
+该仓库包含静态网页、Web Bluetooth、图像处理、AI 提示词与进度、屏幕帧预览、网页测试及 Nginx 部署配置。
+当前线上地址：[https://lumicat.top:8443/](https://lumicat.top:8443/)，原 IP 地址仍可访问。
+固件侧字段定义见 [BLE 协议](docs/ble-protocol.md)，AI 云端流程见 [AI 接入说明](docs/ai-image-integration.md)。
 
 BLE 固件采用独立构建配置，避免沿用未启用蓝牙的旧 `sdkconfig`：
 
@@ -26,8 +22,7 @@ idf.py -B build-ble -D SDKCONFIG=sdkconfig.ble -p /dev/ttyUSB0 flash monitor
 
 AI 生图与 BLE 收图共享一个任务槽。刷屏时暂时断开 BLE，完成后网页重连查询结果。
 网页可以通过蓝牙提交 AI 提示词、查看联网/生成/下载/转换/刷屏阶段，并在成功后回读
-30,000 字节的四色屏幕帧作为预览。部署说明、调试配置和实机验证清单见
-[网页换图说明](docs/ble-web.md)，App 可复用的字段定义见 [BLE 协议](docs/ble-protocol.md)。
+30,000 字节的四色屏幕帧作为预览。网页部署与验证说明在独立仓库中维护。
 
 ## AI 生图与烧录
 
@@ -127,8 +122,8 @@ ai
 覆盖像素打包、连续显示与固定 8 秒恢复保护、BUSY/SPI 故障、关电顺序，以及业务接口的帧长度验证、
 缓冲区复制、并发拒绝和错误返回；同时覆盖图片与 AI 提示词接收、CRC/长度/操作码校验、显式 AI 任务号、
 PNG/JPEG 解码、透明背景、裁剪/四色转换、ModelScope 请求和响应解析、HTTP 下载上限、凭据隔离与重定向，
-以及云端客户端的提交、轮询、失败退出和总超时。网页测试另外覆盖 AI 分块上传、进度轮询、断线重连和
-屏幕帧预览回读。这些模拟测试不替代云端和实屏验证。
+以及云端客户端的提交、轮询、失败退出和总超时。网页测试在独立的 `epaper-web` 仓库中维护，
+覆盖 AI 分块上传、进度轮询、断线重连和屏幕帧预览回读。这些模拟测试不替代云端和实屏验证。
 
 ## 代码结构
 

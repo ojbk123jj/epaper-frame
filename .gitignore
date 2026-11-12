@@ -8,4 +8,3 @@ managed_components/
 .vscode/
 *.log
 config/local_config.h
-web/dist/

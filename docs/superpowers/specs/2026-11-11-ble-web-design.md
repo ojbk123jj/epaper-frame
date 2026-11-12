@@ -1,5 +1,7 @@
 # BLE 网页换图原型
 
+> **2026-11-12:** 网页客户端已拆分到独立仓库 https://github.com/ojbk123jj/epaper-web。本文中的 `web/` 路径和 `docs/ble-web*.md` 为历史记录。
+
 用户已批准：Android 手机通过自托管 HTTPS 网站选图、裁剪、四色预览，经 BLE 将 30,000 字节面板帧发送到 ESP32-S3 并显示，同时实现网页及设备端接收固件。以后将网页客户端替换为 App，沿用协议。
 
 网站为无第三方运行依赖的静态 HTML/CSS/ES modules，照片只在手机本地处理。目标浏览器 Chrome for Android，部署要求 HTTPS、顶层页面和用户点击授权。提供 Nginx 示例，不擅自部署到用户服务器。
