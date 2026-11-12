@@ -5,8 +5,9 @@ ESP32-S3-WROOM-1-N16R8 + GDEM042F86 四色墨水屏（400×300，SSD2683ZA）。
 ## Android 网页 BLE 换图原型
 
 新增 `web/` 静态网站：本地选图、裁剪缩放、四色预览与抖动、导出面板帧，
-通过 Chrome for Android 的 Web Bluetooth 将 30KB 图像直接发送到附近相框。
-网页可部署到自己的 HTTPS 服务器，照片不上传服务器；无需 Wi-Fi 或云 Token 即可换图。
+通过 Chrome for Android 的 Web Bluetooth 将 30KB 图像直接发送到附近相框；
+也可以在同一页面输入 AI 提示词，由相框自行联网生成、刷屏并回读四色预览。
+网页可部署到自己的 HTTPS 服务器，照片不上传服务器；仅 AI 提示词由相框发送到 ModelScope。
 
 当前原型地址：[https://lumicat.top:8443/](https://lumicat.top:8443/)，原 IP 地址仍可访问。
 
@@ -24,13 +25,15 @@ idf.py -B build-ble -D SDKCONFIG=sdkconfig.ble -p /dev/ttyUSB0 flash monitor
 ```
 
 AI 生图与 BLE 收图共享一个任务槽。刷屏时暂时断开 BLE，完成后网页重连查询结果。
-部署说明、调试配置和实机验证清单见 [网页换图说明](docs/ble-web.md)，
-App 可复用的字段定义见 [BLE 协议](docs/ble-protocol.md)。
+网页可以通过蓝牙提交 AI 提示词、查看联网/生成/下载/转换/刷屏阶段，并在成功后回读
+30,000 字节的四色屏幕帧作为预览。部署说明、调试配置和实机验证清单见
+[网页换图说明](docs/ble-web.md)，App 可复用的字段定义见 [BLE 协议](docs/ble-protocol.md)。
 
 ## AI 生图与烧录
 
-已接入 ESP32 直接调用魔搭 ModelScope 的 `Qwen/Qwen-Image`：联网、校时、异步生图、
-下载 PNG/JPEG、裁剪缩放、四色抖动转换、刷新屏幕。默认启动生成一张，也支持串口提示词。
+已接入 ESP32 直接调用魔搭 ModelScope 的 `Qwen/Qwen-Image-2.1-Turbo`：联网、校时、异步生图、
+下载 PNG/JPEG、裁剪缩放、四色抖动转换、刷新屏幕。提示词由网页通过 BLE 提交，
+设备自行联网生成并直接刷屏；不再上电自动生成。串口 `ai` 命令保留用于调试。
 
 先在 [ModelScope](https://modelscope.cn/my/myaccesstoken) 获取 Access Token，按平台要求绑定
 已实名认证的阿里云账号，并确认模型可调用且账户有可用魔粒。免费体验额度以账户显示为准。
@@ -54,13 +57,17 @@ idf.py -B build-ble -D SDKCONFIG=sdkconfig.ble -p /dev/ttyUSB0 flash monitor
 ```
 
 将串口路径改为实际设备。ESP-IDF v5.5.5，16MB Flash，8MB Octal PSRAM，
-CH340K / UART0 / 115200。没有有效配置时跳过启动生图，保留串口控制台。
+CH340K / UART0 / 115200。没有有效配置时仍可使用 BLE 换图，串口控制台保留。
 
 使用 `partitions.csv` 自定义分区表，应用分区为 3MiB，NVS 和 PHY 分区位置保持原值。
 更新分区表后请使用上面的完整 `idf.py flash` 命令，同时烧录分区表和应用。
 
-启动后使用 `APP_AI_PROMPT` 自动生成。首次等待联网、校时、生图及约 20 秒全刷，
-生图轮询最多等待 5 分钟。串口 `frame>` 可输入：
+网页连接相框后，在“AI 生图”页签输入提示词并点击生成。设备首次会联网、校时，
+随后轮询云端任务；生图轮询最多等待 10 分钟。页面展示联网、生成、下载、转换和刷屏阶段，
+刷屏期间蓝牙会短暂断开并自动重连。生成成功后网页会读回四色屏幕帧，可保存为
+`epaper-ai-400x300-2bpp.bin`。
+
+串口 `frame>` 仍保留调试命令：
 
 ```text
 ai status
@@ -72,9 +79,8 @@ ai
 提示词最多 1024 个 UTF-8 字节，含空格时建议用双引号包裹。一次只执行一个任务，忙时拒绝新请求。
 `state=succeeded` 且 `displayed` 增加表示驱动已完成本次刷新；仍需目视核对实际屏幕。
 
-默认请求 `768x576`、全刷、开启四色抖动。在本地配置中可修改默认提示词，或设置
-`APP_AI_GENERATE_ON_BOOT 0` 禁用启动生成，避免每次重启再次消耗云端额度。
-详细流程、限制与故障说明见 [AI 接入说明](docs/ai-image-integration.md)。
+默认请求 `768x576`、全刷、开启四色抖动。详细流程、限制与故障说明见
+[AI 接入说明](docs/ai-image-integration.md)。
 
 ## 显示接口
 
@@ -119,23 +125,24 @@ ai
 ```
 
 覆盖像素打包、连续显示与固定 8 秒恢复保护、BUSY/SPI 故障、关电顺序，以及业务接口的帧长度验证、
-缓冲区复制、并发拒绝和错误返回；同时覆盖 PNG/JPEG 解码、透明背景、裁剪/四色转换、
-ModelScope 请求和响应解析、HTTP 下载上限、凭据隔离与重定向，以及云端客户端的提交、轮询、
-失败退出和总超时。这些模拟测试不替代云端和实屏验证。
+缓冲区复制、并发拒绝和错误返回；同时覆盖图片与 AI 提示词接收、CRC/长度/操作码校验、显式 AI 任务号、
+PNG/JPEG 解码、透明背景、裁剪/四色转换、ModelScope 请求和响应解析、HTTP 下载上限、凭据隔离与重定向，
+以及云端客户端的提交、轮询、失败退出和总超时。网页测试另外覆盖 AI 分块上传、进度轮询、断线重连和
+屏幕帧预览回读。这些模拟测试不替代云端和实屏验证。
 
 ## 代码结构
 
-`main/` 只保留 `main.c` 和 `CMakeLists.txt`，负责初始化、组装组件和触发启动生成。
+`main/` 只保留 `main.c` 和 `CMakeLists.txt`，负责初始化、组装组件和启动任务。
 功能实现按 ESP-IDF 组件组织，每个组件的 `include/` 提供公开接口，`src/` 存放实现。
 
 | 组件 | 职责 | 依赖的业务组件 |
 |---|---|---|
 | `app_config` | 默认配置与本地配置入口、生成缺失的本地配置模板 | 无 |
-| `ai_console` | 串口提示词输入、任务提交和状态展示 | `ai_service`、`app_config` |
-| `ai_service` | 保留串口 AI 接口，适配共享任务和状态 | `frame_service` |
-| `frame_service` | AI/BLE 共享任务所有权、接收预留、帧复制和刷新工作任务 | 云端客户端、联网、图像处理、显示、配置 |
-| `frame_transfer` | 可主机测试的二进制接收状态机、长度/偏移/CRC/超时校验 | 无 |
-| `ble_image` | NimBLE GATT、接收超时、断连清理与刷屏前后无线管理 | `frame_service`、`frame_transfer` |
+| `ai_console` | 串口调试提示词输入、任务提交和状态展示 | `ai_service`、`app_config` |
+| `ai_service` | 串口调试 AI 接口，适配共享任务和状态 | `frame_service` |
+| `frame_service` | AI/BLE 共享任务所有权、接收预留、帧复制、AI 结果保留和刷新工作任务 | 云端客户端、联网、图像处理、显示、配置 |
+| `frame_transfer` | 可主机测试的图片/AI 提示词二进制接收状态机、长度/偏移/CRC/超时校验 | 无 |
+| `ble_image` | NimBLE GATT、图片与提示词接收、AI 状态上报、屏幕帧回读、断连清理与刷屏前后无线管理 | `frame_service`、`frame_transfer` |
 | `modelscope_client` | HTTPS 鉴权、请求构造、提交、轮询和图片下载 | `app_config` |
 | `network_service` | Wi-Fi 连接、SNTP 校时、停止 Wi-Fi | `app_config` |
 | `image_processing` | PNG/JPEG 解码、裁剪缩放、四色抖动及面板格式打包 | `epd_gdem042f86` 的尺寸和像素打包定义 |

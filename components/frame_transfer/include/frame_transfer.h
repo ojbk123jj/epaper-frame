@@ -4,17 +4,24 @@
 #include <stdint.h>
 
 #define FRAME_BYTES 30000U
+#define FRAME_PROMPT_MAX 1024U
 #define FRAME_RX_TIMEOUT_MS 30000U
 typedef enum {
     FRAME_OK, FRAME_PACKET, FRAME_BUSY, FRAME_SIZE, FRAME_CHECKSUM,
     FRAME_OFFSET, FRAME_TIMEOUT, FRAME_STATE
 } frame_result_t;
+typedef enum {
+    FRAME_KIND_NONE = 0,
+    FRAME_KIND_IMAGE,
+    FRAME_KIND_AI_PROMPT,
+} frame_kind_t;
 typedef struct {
     uint8_t *buffer;
-    size_t capacity, received;
+    size_t capacity, received, expected;
     uint32_t job_id, checksum;
     uint64_t touched_ms;
     uint8_t mode;
+    frame_kind_t kind;
     bool active;
 } frame_rx_t;
 uint32_t frame_crc32(const uint8_t *data, size_t length);

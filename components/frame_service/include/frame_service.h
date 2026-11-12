@@ -12,14 +12,21 @@ typedef enum {
 typedef enum { FRAME_SOURCE_NONE, FRAME_SOURCE_AI, FRAME_SOURCE_BLE } frame_source_t;
 typedef struct {
     bool configured, busy;
-    frame_stage_t stage;
+    frame_stage_t stage, failure_stage;
     frame_source_t source;
-    uint32_t job_id, displayed_count;
+    uint32_t job_id, displayed_count, elapsed_ms;
+    uint32_t last_ai_job_id;
+    bool has_ai_preview;
     esp_err_t last_error;
 } frame_status_t;
 typedef esp_err_t (*frame_radio_guard_t)(bool quiet);
 esp_err_t frame_service_start(void);
+/* Serial/debug entry: the service allocates a new AI job id. */
 esp_err_t frame_service_submit_ai(const char *prompt);
+/* BLE entry: the caller owns the nonzero job id so it can verify the result. */
+esp_err_t frame_service_submit_ai_id(uint32_t job_id, const char *prompt);
+/* Copy the most recent successfully displayed AI frame. Pass 0 for any job. */
+esp_err_t frame_service_copy_last_ai_frame(uint32_t job_id, uint8_t *frame);
 /* Reserve before receiving any frame bytes. Commit copies; caller retains buffer. */
 esp_err_t frame_service_reserve(uint32_t job_id);
 esp_err_t frame_service_commit(uint32_t job_id, const uint8_t *frame, size_t length, epd_mode_t mode);

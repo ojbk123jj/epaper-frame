@@ -22,6 +22,8 @@ int main(void)
     deinit_error=0;start_error=-1;radio.state=IMAGE_RADIO_OFF;
     assert(image_radio_resume(&radio,&ops)!=0&&radio.state==IMAGE_RADIO_BROKEN);
     assert(ble_image_write_limit(23)==20&&ble_image_write_limit(247)==244&&ble_image_write_limit(517)==244);
+    assert(ble_image_read_limit(23)==18&&ble_image_read_limit(247)==240&&ble_image_read_limit(517)==240);
+    assert(ble_image_read_limit(5)==0&&ble_image_read_limit(6)==1);
     assert(ble_image_session_error(FRAME_OK,false,FRAME_STATE,false)==FRAME_OK);
     assert(ble_image_session_error(FRAME_TIMEOUT,false,FRAME_PACKET,false)==FRAME_TIMEOUT);
     assert(ble_image_session_error(FRAME_OK,true,FRAME_OFFSET,false)==FRAME_OFFSET);

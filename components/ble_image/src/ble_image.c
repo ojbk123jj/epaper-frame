@@ -1,5 +1,6 @@
 #include "ble_image.h"
 #include <string.h>
+#include "app_config.h"
 #include "frame_transfer.h"
 #include "frame_service.h"
 #include "radio_lifecycle.h"
@@ -23,7 +24,8 @@
 /* UUID bytes are little endian. See docs/ble-protocol.md for canonical strings. */
 #define FRAME_UUID(n) BLE_UUID128_INIT(0x01,0x40,0xb7,0xe5,0xd3,0x61,0xc8,0xa6,0x2b,0x4f,0x7d,0x9c,n,0x00,0xe1,0xf0)
 static const ble_uuid128_t s_service_uuid=FRAME_UUID(0),s_info_uuid=FRAME_UUID(1),
-    s_control_uuid=FRAME_UUID(2),s_data_uuid=FRAME_UUID(3),s_status_uuid=FRAME_UUID(4);
+    s_control_uuid=FRAME_UUID(2),s_data_uuid=FRAME_UUID(3),s_status_uuid=FRAME_UUID(4),
+    s_ai_uuid=FRAME_UUID(5),s_preview_uuid=FRAME_UUID(6);
 static const char *TAG="ble_image";
 static SemaphoreHandle_t s_lock;
 static EventGroupHandle_t s_events;
@@ -37,7 +39,12 @@ static bool s_synced,s_paused;
 static frame_result_t s_error;
 static esp_timer_handle_t s_timer;
 static image_radio_t s_radio={.state=IMAGE_RADIO_RUNNING};
+static uint8_t *s_preview;
+static size_t s_preview_offset;
+static bool s_preview_ready;
 static int start_stack(void);
+
+_Static_assert(FRAME_PROMPT_MAX==APP_AI_MAX_PROMPT,"AI prompt limit mismatch");
 
 static int gap_event(struct ble_gap_event *event,void *arg);
 static void put16(uint8_t *p,uint16_t v){p[0]=v;p[1]=v>>8;}
@@ -62,8 +69,36 @@ static int advertise_locked(void)
 }
 static void cancel_locked(esp_err_t reason)
 {
-    if(s_rx.active)frame_service_cancel(s_rx.job_id,reason);
+    /* A prompt upload never reserves the shared slot; only an image receive does. */
+    if(s_rx.active&&s_rx.kind==FRAME_KIND_IMAGE)frame_service_cancel(s_rx.job_id,reason);
     frame_rx_abort(&s_rx);
+}
+static void ai_status_locked(uint8_t p[16])
+{
+    frame_status_t st;frame_service_status(&st);
+    memset(p,0,16);p[0]=1;
+    uint8_t state=0;
+    if(st.source==FRAME_SOURCE_AI) {
+        switch(st.stage) {
+        case FRAME_QUEUED:state=1;break;
+        case FRAME_CONNECTING:state=2;break;
+        case FRAME_GENERATING:state=3;break;
+        case FRAME_DOWNLOADING:state=4;break;
+        case FRAME_CONVERTING:state=5;break;
+        case FRAME_DISPLAYING:state=6;break;
+        case FRAME_SUCCEEDED:state=7;break;
+        case FRAME_FAILED:state=8;break;
+        default:break;
+        }
+    }
+    p[1]=state;
+    put16(p+2,(uint16_t)st.last_error);
+    put32(p+4,st.source==FRAME_SOURCE_AI?st.job_id:0);
+    uint32_t elapsed=st.elapsed_ms/1000;if(elapsed>0xffff)elapsed=0xffff;
+    put16(p+8,(uint16_t)elapsed);
+    p[10]=(uint8_t)st.failure_stage;
+    p[11]=st.has_ai_preview?1:0;
+    put32(p+12,st.last_ai_job_id);
 }
 static void status_locked(uint8_t p[20])
 {
@@ -92,11 +127,29 @@ static int access_gatt(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *
     (void)attr;int kind=(int)(intptr_t)arg,rc=0;uint8_t p[244];
     xSemaphoreTake(s_lock,portMAX_DELAY);
     if(ctxt->op==BLE_GATT_ACCESS_OP_READ_CHR&&kind==1) {
+        frame_status_t st;frame_service_status(&st);
         memset(p,0,16);p[0]=1;p[1]=4;put16(p+2,400);put16(p+4,300);put32(p+6,FRAME_BYTES);
         put16(p+10,ble_image_write_limit(ble_att_mtu(conn)));p[12]=3;
+        p[13]=(uint8_t)(1|(st.configured?2:0)|4);
+        put16(p+14,(uint16_t)APP_AI_MAX_PROMPT);
         rc=os_mbuf_append(ctxt->om,p,16)?BLE_ATT_ERR_INSUFFICIENT_RES:0;
     } else if(ctxt->op==BLE_GATT_ACCESS_OP_READ_CHR&&kind==4) {
         status_locked(p);rc=os_mbuf_append(ctxt->om,p,20)?BLE_ATT_ERR_INSUFFICIENT_RES:0;
+    } else if(ctxt->op==BLE_GATT_ACCESS_OP_READ_CHR&&kind==5) {
+        ai_status_locked(p);rc=os_mbuf_append(ctxt->om,p,16)?BLE_ATT_ERR_INSUFFICIENT_RES:0;
+    } else if(ctxt->op==BLE_GATT_ACCESS_OP_READ_CHR&&kind==6) {
+        if(!s_preview_ready) {
+            rc=BLE_ATT_ERR_UNLIKELY;
+        } else {
+            size_t limit=ble_image_read_limit(ble_att_mtu(conn));
+            size_t remaining=FRAME_BYTES-s_preview_offset;
+            size_t n=remaining<limit?remaining:limit;
+            put32(p,(uint32_t)s_preview_offset);
+            if(n)memcpy(p+4,s_preview+s_preview_offset,n);
+            rc=os_mbuf_append(ctxt->om,p,4+n)?BLE_ATT_ERR_INSUFFICIENT_RES:0;
+            s_preview_offset+=n;
+            if(s_preview_offset>=FRAME_BYTES)s_preview_ready=false;
+        }
     } else if(ctxt->op==BLE_GATT_ACCESS_OP_WRITE_CHR&&(kind==2||kind==3)) {
         size_t len=OS_MBUF_PKTLEN(ctxt->om);
         if(s_paused||len>ble_image_write_limit(ble_att_mtu(conn))||os_mbuf_copydata(ctxt->om,0,len,p)) {
@@ -111,12 +164,40 @@ static int access_gatt(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *
                     frame_rx_abort(&s_rx);result=FRAME_BUSY;
                 }
                 began=result==FRAME_OK;
+            } else if(len==15&&p[0]==4) {
+                frame_status_t st;frame_service_status(&st);
+                if(!st.configured||st.busy) {
+                    result=FRAME_BUSY;
+                } else {
+                    result=frame_rx_begin(&s_rx,p,len,esp_timer_get_time()/1000);
+                    began=result==FRAME_OK;
+                }
             } else if(len==6&&p[0]==2) {
                 result=frame_rx_commit(&s_rx,p,len);
                 if(result==FRAME_OK) {
                     esp_err_t err=frame_service_commit(s_rx.job_id,s_rx.buffer,FRAME_BYTES,
                         s_rx.mode?EPD_MODE_FAST:EPD_MODE_FULL);
                     if(err!=ESP_OK){frame_service_cancel(s_rx.job_id,err);result=FRAME_STATE;}
+                }
+            } else if(len==6&&p[0]==5) {
+                result=frame_rx_commit(&s_rx,p,len);
+                if(result==FRAME_OK&&s_rx.kind==FRAME_KIND_AI_PROMPT) {
+                    if(memchr(s_rx.buffer,0,s_rx.received)) {
+                        result=FRAME_PACKET;
+                    } else {
+                        s_rx.buffer[s_rx.received]='\0';
+                        esp_err_t err=frame_service_submit_ai_id(s_rx.job_id,(const char *)s_rx.buffer);
+                        if(err!=ESP_OK)result=FRAME_STATE;
+                    }
+                } else if(result==FRAME_OK) {
+                    result=FRAME_STATE;
+                }
+            } else if(len==6&&p[0]==6&&p[1]==1) {
+                s_preview_ready=false;
+                if(!s_preview||frame_service_copy_last_ai_frame(get32(p+2),s_preview)!=ESP_OK) {
+                    result=FRAME_STATE;
+                } else {
+                    s_preview_offset=0;s_preview_ready=true;result=FRAME_OK;
                 }
             } else if(len==6&&p[0]==3&&p[1]==1&&s_rx.active&&get32(p+2)==s_rx.job_id) {
                 cancel_locked(ESP_FAIL);result=FRAME_OK;
@@ -135,6 +216,8 @@ static const struct ble_gatt_svc_def s_services[]={
         {.uuid=&s_control_uuid.u,.access_cb=access_gatt,.arg=(void *)2,.flags=BLE_GATT_CHR_F_WRITE},
         {.uuid=&s_data_uuid.u,.access_cb=access_gatt,.arg=(void *)3,.flags=BLE_GATT_CHR_F_WRITE},
         {.uuid=&s_status_uuid.u,.access_cb=access_gatt,.arg=(void *)4,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_NOTIFY,.val_handle=&s_status_handle},
+        {.uuid=&s_ai_uuid.u,.access_cb=access_gatt,.arg=(void *)5,.flags=BLE_GATT_CHR_F_READ},
+        {.uuid=&s_preview_uuid.u,.access_cb=access_gatt,.arg=(void *)6,.flags=BLE_GATT_CHR_F_READ},
         {0}}}, {0}
 };
 static int gap_event(struct ble_gap_event *event,void *arg)
@@ -240,7 +323,9 @@ esp_err_t ble_image_start(void)
     if(s_lock)return ESP_ERR_INVALID_STATE;
     s_lock=xSemaphoreCreateMutex();s_events=xEventGroupCreate();
     uint8_t *buffer=heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(!s_lock||!s_events||!buffer){free(buffer);return ESP_ERR_NO_MEM;}
+    s_preview=heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!s_lock||!s_events||!buffer||!s_preview){free(buffer);free(s_preview);s_preview=NULL;return ESP_ERR_NO_MEM;}
+    s_preview_offset=0;s_preview_ready=false;
     frame_rx_init(&s_rx,buffer,FRAME_BYTES);xEventGroupSetBits(s_events,DISCONNECTED);
     esp_err_t err=nvs_flash_init();if(err!=ESP_OK)return err;
     int rc=start_stack();if(rc)return ESP_FAIL;

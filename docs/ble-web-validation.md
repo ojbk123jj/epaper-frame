@@ -47,3 +47,15 @@
 - `http://lumicat.top/` 返回 301 到域名 HTTPS 地址。IP 虚拟主机显式设置为 8443 的 default_server，原 IP HTTPS 访问仍返回 200。
 - 自动续期服务改为检查全部已管理证书；手动运行服务 Result=success、ExecMainStatus=0。域名证书续期 dry-run 与 Nginx 重载钩子返回 0。
 - 443 原服务保持运行，故域名 HTTPS 地址仍需带 8443 端口。没有修改网页功能、编译或烧录固件。
+
+## AI 网页生图与预览（2026-11-12）
+
+- 固件已移除上电自动生图；新增 BLE AI 提示词上传、AI Status 特征和 Preview Data 屏幕帧回读。
+- 固件以当前 ESP-IDF v5.5.5 构建配置编译通过，应用约 1.3MiB，小于 3MiB 分区。
+- 主机回归 `./tests/host/run.sh` 全部通过，包含提示词接收、CRC/长度/操作码、显式 AI 任务号、共享任务槽与显示保护。
+- 网页测试 `npm --prefix web test` 共 27 项通过，覆盖 AI 分块上传、阶段轮询、断线重连、失败阶段和屏幕帧预览。
+- 无头 Chrome 已加载新页面，未发现脚本异常；无 Web Bluetooth 时正确显示兼容性提示。
+- **尚未完成真实 Android Web Bluetooth、ModelScope 云端生成、实屏刷屏和 30KB 预览回读联调；需按 `docs/ble-web.md` 清单在实机验证。**
+- 2026-11-12 模型切换：默认生图模型改为 `Qwen/Qwen-Image-2.1-Turbo`，云端轮询上限改为 10 分钟，网页等待上限改为 15 分钟；串口新增 `task_id`、`task_status` 和轮询耗时日志。
+- 已用本机 Token 对 `Qwen/Qwen-Image-2.1-Turbo` 做一次真实 API-Inference 测试：提交返回 200，轮询约 18 秒达到 `SUCCEED`，`size=768x576` 可用；该测试消耗一次生成额度。
+- 新网页已重新部署，`src/ble.js` 的 `aiResultTimeoutMs=900000`；固件已编译包含新模型和超时配置，等待连接串口后烧录验证。

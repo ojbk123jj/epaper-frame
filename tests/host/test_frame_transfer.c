@@ -50,5 +50,39 @@ int main(void)
     assert(!rx.active);
     put32(begin+2,0);
     assert(frame_rx_begin(&rx,begin,15,0)==FRAME_PACKET);
+
+    /* AI prompt sessions share the data characteristic but have their own kind. */
+    static uint8_t prompt[5]={'h','e','l','l','o'};
+    uint8_t ai_begin[15]={4,1}; put32(ai_begin+2,77); put32(ai_begin+6,5);
+    put32(ai_begin+10,frame_crc32(prompt,5));
+    uint8_t ai_commit[6]={5,1}; put32(ai_commit+2,77);
+    frame_rx_init(&rx,buffer,sizeof(buffer));
+    ai_begin[14]=1;
+    assert(frame_rx_begin(&rx,ai_begin,15,0)==FRAME_PACKET);
+    ai_begin[14]=0;
+    put32(ai_begin+6,0);
+    assert(frame_rx_begin(&rx,ai_begin,15,0)==FRAME_SIZE);
+    put32(ai_begin+6,1025);
+    assert(frame_rx_begin(&rx,ai_begin,15,0)==FRAME_SIZE);
+    put32(ai_begin+6,5);
+    assert(frame_rx_begin(&rx,ai_begin,15,0)==FRAME_OK);
+    assert(frame_rx_begin(&rx,ai_begin,15,0)==FRAME_BUSY);
+    uint8_t prompt_data[9]={0}; memcpy(prompt_data+4,prompt,5);
+    assert(frame_rx_write(&rx,prompt_data,9,1)==FRAME_OK);
+    assert(frame_rx_write(&rx,prompt_data,9,1)==FRAME_OFFSET);
+    uint8_t wrong_commit[6]={2,1}; put32(wrong_commit+2,77);
+    assert(frame_rx_commit(&rx,wrong_commit,6)==FRAME_PACKET);
+    assert(rx.active);
+    assert(frame_rx_commit(&rx,ai_commit,6)==FRAME_OK);
+    assert(!rx.active && rx.kind==FRAME_KIND_AI_PROMPT && !memcmp(buffer,prompt,5));
+    put32(ai_begin+10,frame_crc32(prompt,5));
+    assert(frame_rx_begin(&rx,ai_begin,15,2)==FRAME_OK);
+    prompt_data[5]='a';
+    put32(prompt_data,0);
+    assert(frame_rx_write(&rx,prompt_data,9,3)==FRAME_OK);
+    assert(frame_rx_commit(&rx,ai_commit,6)==FRAME_CHECKSUM);
+    assert(rx.active);
+    frame_rx_abort(&rx);
+    assert(rx.kind==FRAME_KIND_NONE && rx.expected==0);
     puts("Frame transfer validation tests passed");
 }

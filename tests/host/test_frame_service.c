@@ -10,6 +10,7 @@
 
 static unsigned calls, pauses, resumes;
 static int display_result, pause_result;
+static bool ai_success;
 static uint8_t shown[30000], queued[2048];
 static size_t queue_size;
 static bool has_job;
@@ -26,14 +27,30 @@ void vQueueDelete(void *p){free(p);}
 int xTaskCreate(void (*f)(void *),const char *n,unsigned s,void *a,unsigned p,void *h)
 {worker_fn=f;(void)n;(void)s;(void)a;(void)p;(void)h;return 1;}
 void vTaskDelay(unsigned t){(void)t;}
+static int64_t time_us;
+int64_t esp_timer_get_time(void){time_us+=1000000;return time_us;}
 esp_err_t network_service_prepare(void){return ESP_OK;}
 esp_err_t network_service_suspend(void){return ESP_OK;}
-esp_err_t modelscope_generate_image(const char *p,char **u){(void)p;(void)u;return ESP_FAIL;}
-esp_err_t modelscope_download_image(const char *u,uint8_t **d,size_t *n){(void)u;(void)d;(void)n;return ESP_FAIL;}
+esp_err_t modelscope_generate_image(const char *p,char **u)
+{
+    (void)p;if(!ai_success)return ESP_FAIL;
+    *u=malloc(32);if(!*u)return ESP_ERR_NO_MEM;strcpy(*u,"https://example.com/frame.png");return ESP_OK;
+}
+esp_err_t modelscope_download_image(const char *u,uint8_t **d,size_t *n)
+{
+    (void)u;if(!ai_success)return ESP_FAIL;
+    *d=malloc(4);if(!*d)return ESP_ERR_NO_MEM;memset(*d,0,4);*n=4;return ESP_OK;
+}
 esp_err_t image_decode_rgb(const uint8_t *d,size_t n,uint8_t **r,int *w,int *h)
-{(void)d;(void)n;(void)r;(void)w;(void)h;return ESP_FAIL;}
+{
+    (void)d;(void)n;if(!ai_success)return ESP_FAIL;
+    *r=calloc(400*300,3);if(!*r)return ESP_ERR_NO_MEM;*w=400;*h=300;return ESP_OK;
+}
 esp_err_t image_rgb_to_frame(const uint8_t *r,size_t n,int w,int h,bool d,uint8_t *f,size_t l)
-{(void)r;(void)n;(void)w;(void)h;(void)d;(void)f;(void)l;return ESP_FAIL;}
+{
+    (void)r;(void)n;(void)w;(void)h;(void)d;if(!ai_success)return ESP_FAIL;
+    memset(f,0x1b,l);return ESP_OK;
+}
 esp_err_t epaper_display_show(const uint8_t *f,size_t n,epd_mode_t m)
 {(void)m;assert(n==30000);memcpy(shown,f,n);calls++;return display_result;}
 static esp_err_t guard(bool quiet){if(quiet){pauses++;return pause_result;}resumes++;return ESP_OK;}
@@ -68,10 +85,31 @@ int main(void)
     pause_result=ESP_FAIL;run_queued();assert(calls==1);
     frame_service_status(&status);assert(status.stage==FRAME_FAILED&&!status.busy);
     pause_result=ESP_OK;
+    assert(frame_service_submit_ai_id(0,"hello")==ESP_ERR_INVALID_ARG);
     if(configured) {
-        assert(frame_service_submit_ai("hello")==ESP_OK);
+        assert(frame_service_submit_ai_id(123,"hello")==ESP_OK);
+        frame_service_status(&status);
+        assert(status.busy&&status.job_id==123&&status.source==FRAME_SOURCE_AI);
         assert(frame_service_reserve(11)==ESP_ERR_INVALID_STATE);
-        run_queued();frame_service_status(&status);assert(!status.busy&&status.stage==FRAME_FAILED);
+        run_queued();frame_service_status(&status);
+        assert(!status.busy&&status.stage==FRAME_FAILED&&status.job_id==123);
+        assert(status.failure_stage==FRAME_GENERATING);
+        static uint8_t preview[30000];
+        assert(frame_service_copy_last_ai_frame(123,preview)==ESP_ERR_INVALID_STATE);
+        assert(frame_service_submit_ai("hello")==ESP_OK);
+        run_queued();frame_service_status(&status);
+        assert(!status.busy&&status.stage==FRAME_FAILED);
+
+        ai_success=true;
+        assert(frame_service_submit_ai_id(124,"hello")==ESP_OK);
+        run_queued();frame_service_status(&status);
+        assert(!status.busy&&status.stage==FRAME_SUCCEEDED);
+        assert(status.last_ai_job_id==124&&status.has_ai_preview);
+        assert(frame_service_copy_last_ai_frame(124,preview)==ESP_OK);
+        assert(preview[0]==0x1b);
+        assert(frame_service_copy_last_ai_frame(0,preview)==ESP_OK);
+        assert(frame_service_copy_last_ai_frame(125,preview)==ESP_ERR_INVALID_STATE);
+        ai_success=false;
     }
     puts("Shared AI/BLE frame ownership tests passed");
 }

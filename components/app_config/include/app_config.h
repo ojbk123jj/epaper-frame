@@ -15,7 +15,7 @@
 #define APP_MODELSCOPE_TOKEN ""
 #endif
 #ifndef APP_AI_MODEL
-#define APP_AI_MODEL "Qwen/Qwen-Image"
+#define APP_AI_MODEL "Qwen/Qwen-Image-2.1-Turbo"
 #endif
 #ifndef APP_AI_SIZE
 #define APP_AI_SIZE "768x576"
@@ -23,13 +23,12 @@
 #ifndef APP_AI_PROMPT
 #define APP_AI_PROMPT "黑白红黄四色插画，一只坐在窗边的猫，简洁构图，清晰轮廓，大块色彩，无文字，横向4:3画面"
 #endif
-#ifndef APP_AI_GENERATE_ON_BOOT
-#define APP_AI_GENERATE_ON_BOOT 1
-#endif
 #ifndef APP_AI_FAST_REFRESH
 #define APP_AI_FAST_REFRESH 0
 #endif
 
-#define APP_AI_TIMEOUT_MS 300000U
+#ifndef APP_AI_TIMEOUT_MS
+#define APP_AI_TIMEOUT_MS 600000U
+#endif
 #define APP_AI_MAX_PROMPT 1024U
 #define APP_AI_MAX_IMAGE_BYTES (2U * 1024U * 1024U)

@@ -8,6 +8,7 @@
 #include "image_decode.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -17,6 +18,7 @@ typedef struct {
     char prompt[APP_AI_MAX_PROMPT+1];
     uint8_t *frame;
     epd_mode_t mode;
+    uint32_t job_id;
 } frame_job_t;
 static const char *TAG="frame";
 static QueueHandle_t s_jobs;
@@ -24,6 +26,9 @@ static SemaphoreHandle_t s_lock;
 static frame_status_t s_status;
 static frame_radio_guard_t s_guard;
 static uint32_t s_ai_id;
+static uint8_t *s_last_ai_frame;
+static int64_t s_started_us;
+static uint32_t s_last_elapsed_ms;
 
 const char *frame_stage_name(frame_stage_t stage)
 {
@@ -75,29 +80,35 @@ static void process_job(frame_job_t *job)
             displayed=err==ESP_OK;
         }
     }
-    free(job->frame);job->frame=NULL;
     xSemaphoreTake(s_lock,portMAX_DELAY);
     frame_stage_t failed_stage=s_status.stage;
-    uint32_t completed_id=s_status.job_id;
-    (void)failed_stage;(void)from_ai;(void)completed_id; /* Logging may be compiled out. */
+    /* Keep the frame the panel actually showed for the web preview readback. */
+    if(displayed&&from_ai&&s_last_ai_frame) {
+        memcpy(s_last_ai_frame,job->frame,EPD_FB_SIZE);
+        s_status.last_ai_job_id=job->job_id;s_status.has_ai_preview=true;
+    }
     s_status.stage=err==ESP_OK?FRAME_SUCCEEDED:FRAME_FAILED;
+    s_status.failure_stage=err==ESP_OK?FRAME_IDLE:failed_stage;
     s_status.last_error=err;
     if(displayed)++s_status.displayed_count;
+    s_last_elapsed_ms=s_started_us?(uint32_t)((esp_timer_get_time()-s_started_us)/1000):0;
     /* Keep ownership until radio is restored, so a new task cannot race resume. */
     xSemaphoreGive(s_lock);
+    free(job->frame);job->frame=NULL;
     if(s_guard) {
         radio=s_guard(false);
         if(radio!=ESP_OK) {
             xSemaphoreTake(s_lock,portMAX_DELAY);
             s_status.last_error=radio;s_status.stage=FRAME_FAILED;
+            s_status.failure_stage=FRAME_DISPLAYING;
             xSemaphoreGive(s_lock);
             ESP_LOGE(TAG,"BLE resume failed: %s",esp_err_to_name(radio));
             err=radio;
         }
     }
     xSemaphoreTake(s_lock,portMAX_DELAY);s_status.busy=false;xSemaphoreGive(s_lock);
-    if(err==ESP_OK)ESP_LOGI(TAG,"%s (job %lu)",from_ai?"image generation and display completed":"BLE image display completed",(unsigned long)completed_id);
-    else ESP_LOGE(TAG,"%s job %lu failed at %s: %s",from_ai?"AI":"BLE",(unsigned long)completed_id,frame_stage_name(failed_stage),esp_err_to_name(err));
+    if(err==ESP_OK)ESP_LOGI(TAG,"%s (job %lu)",from_ai?"image generation and display completed":"BLE image display completed",(unsigned long)job->job_id);
+    else ESP_LOGE(TAG,"%s job %lu failed at %s: %s",from_ai?"AI":"BLE",(unsigned long)job->job_id,frame_stage_name(failed_stage),esp_err_to_name(err));
 }
 static void worker(void *arg)
 {
@@ -109,28 +120,44 @@ esp_err_t frame_service_start(void)
     if(s_lock||s_jobs)return ESP_ERR_INVALID_STATE;
     s_lock=xSemaphoreCreateMutex();s_jobs=xQueueCreate(1,sizeof(frame_job_t));
     if(!s_lock||!s_jobs)goto fail;
+    /* Preview is optional; the BLE layer reports it as unavailable if absent. */
+    s_last_ai_frame=heap_caps_malloc(EPD_FB_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!s_last_ai_frame)ESP_LOGW(TAG,"AI preview buffer unavailable");
     s_status.configured=configured();
     if(xTaskCreate(worker,"frame_job",24576,NULL,5,NULL)!=pdPASS)goto fail;
     return ESP_OK;
 fail:
     if(s_jobs)vQueueDelete(s_jobs);
     if(s_lock)vSemaphoreDelete(s_lock);
+    if(s_last_ai_frame){free(s_last_ai_frame);s_last_ai_frame=NULL;}
     s_jobs=NULL;s_lock=NULL;return ESP_ERR_NO_MEM;
 }
-esp_err_t frame_service_submit_ai(const char *prompt)
+esp_err_t frame_service_submit_ai_id(uint32_t job_id,const char *prompt)
 {
-    if(!prompt||!*prompt||strlen(prompt)>APP_AI_MAX_PROMPT)return ESP_ERR_INVALID_ARG;
+    if(!job_id||!prompt||!*prompt||strlen(prompt)>APP_AI_MAX_PROMPT)return ESP_ERR_INVALID_ARG;
     if(!s_lock)return ESP_ERR_INVALID_STATE;
-    frame_job_t job={.mode=APP_AI_FAST_REFRESH?EPD_MODE_FAST:EPD_MODE_FULL};
+    frame_job_t job={.mode=APP_AI_FAST_REFRESH?EPD_MODE_FAST:EPD_MODE_FULL,.job_id=job_id};
     memcpy(job.prompt,prompt,strlen(prompt));
     xSemaphoreTake(s_lock,portMAX_DELAY);
     if(s_status.busy||!s_status.configured){xSemaphoreGive(s_lock);return ESP_ERR_INVALID_STATE;}
     frame_status_t previous=s_status;
+    uint32_t previous_elapsed=s_last_elapsed_ms;
     s_status.busy=true;s_status.source=FRAME_SOURCE_AI;s_status.stage=FRAME_QUEUED;
-    if(!++s_ai_id)++s_ai_id;
-    s_status.job_id=s_ai_id;
-    if(xQueueSend(s_jobs,&job,0)!=pdTRUE){s_status=previous;xSemaphoreGive(s_lock);return ESP_FAIL;}
+    s_status.failure_stage=FRAME_IDLE;s_status.job_id=job_id;s_status.last_error=ESP_OK;
+    if(xQueueSend(s_jobs,&job,0)!=pdTRUE){
+        s_status=previous;s_last_elapsed_ms=previous_elapsed;xSemaphoreGive(s_lock);return ESP_FAIL;
+    }
+    s_started_us=esp_timer_get_time();s_last_elapsed_ms=0;
     xSemaphoreGive(s_lock);return ESP_OK;
+}
+esp_err_t frame_service_submit_ai(const char *prompt)
+{
+    if(!s_lock)return ESP_ERR_INVALID_STATE;
+    uint32_t job_id;
+    xSemaphoreTake(s_lock,portMAX_DELAY);
+    job_id=++s_ai_id;if(!job_id)job_id=++s_ai_id;
+    xSemaphoreGive(s_lock);
+    return frame_service_submit_ai_id(job_id,prompt);
 }
 esp_err_t frame_service_reserve(uint32_t id)
 {
@@ -139,7 +166,8 @@ esp_err_t frame_service_reserve(uint32_t id)
     xSemaphoreTake(s_lock,portMAX_DELAY);
     if(s_status.busy){xSemaphoreGive(s_lock);return ESP_ERR_INVALID_STATE;}
     s_status.busy=true;s_status.source=FRAME_SOURCE_BLE;s_status.stage=FRAME_RECEIVING;
-    s_status.job_id=id;s_status.last_error=ESP_OK;
+    s_status.failure_stage=FRAME_IDLE;s_status.job_id=id;s_status.last_error=ESP_OK;
+    s_started_us=esp_timer_get_time();s_last_elapsed_ms=0;
     xSemaphoreGive(s_lock);return ESP_OK;
 }
 static bool receiving(uint32_t id)
@@ -150,7 +178,7 @@ esp_err_t frame_service_commit(uint32_t id,const uint8_t *frame,size_t length,ep
     if(!s_lock)return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_lock,portMAX_DELAY);
     if(!receiving(id)){xSemaphoreGive(s_lock);return ESP_ERR_INVALID_STATE;}
-    frame_job_t job={.mode=mode};
+    frame_job_t job={.mode=mode,.job_id=id};
     job.frame=heap_caps_malloc(EPD_FB_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!job.frame){xSemaphoreGive(s_lock);return ESP_ERR_NO_MEM;}
     memcpy(job.frame,frame,length);s_status.stage=FRAME_QUEUED;
@@ -162,14 +190,32 @@ esp_err_t frame_service_cancel(uint32_t id,esp_err_t reason)
     if(!s_lock)return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_lock,portMAX_DELAY);
     if(!receiving(id)){xSemaphoreGive(s_lock);return ESP_ERR_INVALID_STATE;}
-    s_status.busy=false;s_status.stage=FRAME_FAILED;s_status.last_error=reason;
+    s_status.busy=false;s_status.stage=FRAME_FAILED;s_status.failure_stage=FRAME_RECEIVING;
+    s_status.last_error=reason;
     xSemaphoreGive(s_lock);return ESP_OK;
 }
 void frame_service_status(frame_status_t *status)
 {
     if(!status)return;
     if(!s_lock){memset(status,0,sizeof(*status));return;}
-    xSemaphoreTake(s_lock,portMAX_DELAY);*status=s_status;xSemaphoreGive(s_lock);
+    xSemaphoreTake(s_lock,portMAX_DELAY);*status=s_status;
+    if(status->busy&&s_started_us)
+        status->elapsed_ms=(uint32_t)((esp_timer_get_time()-s_started_us)/1000);
+    else
+        status->elapsed_ms=s_last_elapsed_ms;
+    xSemaphoreGive(s_lock);
+}
+esp_err_t frame_service_copy_last_ai_frame(uint32_t job_id,uint8_t *frame)
+{
+    if(!frame)return ESP_ERR_INVALID_ARG;
+    if(!s_lock)return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_lock,portMAX_DELAY);
+    if(!s_last_ai_frame||!s_status.has_ai_preview||
+       (job_id&&job_id!=s_status.last_ai_job_id)) {
+        xSemaphoreGive(s_lock);return ESP_ERR_INVALID_STATE;
+    }
+    memcpy(frame,s_last_ai_frame,EPD_FB_SIZE);
+    xSemaphoreGive(s_lock);return ESP_OK;
 }
 void frame_service_set_radio_guard(frame_radio_guard_t guard)
 {s_guard=guard; /* Startup only, before any job is submitted. */}

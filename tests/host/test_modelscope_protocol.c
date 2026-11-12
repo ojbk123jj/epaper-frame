@@ -14,11 +14,11 @@ static esp_err_t task(const char *json, modelscope_task_state_t *state, char **u
 int main(void)
 {
     const char *prompt = "猫，红色\"帽子\"\nback\\slash";
-    char *json = modelscope_request_json("Qwen/Qwen-Image", prompt, "768x576");
+    char *json = modelscope_request_json("Qwen/Qwen-Image-2.1-Turbo", prompt, "768x576");
     assert(json);
     cJSON *root = cJSON_Parse(json); assert(root);
     assert(!strcmp(cJSON_GetObjectItem(root, "prompt")->valuestring, prompt));
-    assert(!strcmp(cJSON_GetObjectItem(root, "model")->valuestring, "Qwen/Qwen-Image"));
+    assert(!strcmp(cJSON_GetObjectItem(root, "model")->valuestring, "Qwen/Qwen-Image-2.1-Turbo"));
     cJSON_Delete(root); free(json);
     char id[MODELSCOPE_TASK_ID_SIZE];
     const char *submit = "{\"task_id\":\"abc-123_test\"} \n";

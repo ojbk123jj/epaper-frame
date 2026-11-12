@@ -6,6 +6,9 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "esp_log.h"
+
+static const char *TAG = "modelscope_task";
 
 static cJSON *parse_object(const char *body, size_t length)
 {
@@ -94,6 +97,7 @@ esp_err_t modelscope_parse_task(const char *body, size_t length,
     const cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "task_status");
     esp_err_t err = ESP_ERR_INVALID_RESPONSE;
     if (!cJSON_IsString(status) || !status->valuestring) goto done;
+    ESP_LOGI(TAG, "task_status=%s", status->valuestring);
     if (!strcmp(status->valuestring, "PENDING") || !strcmp(status->valuestring, "RUNNING")) {
         err = ESP_OK;
     } else if (!strcmp(status->valuestring, "FAILED") || !strcmp(status->valuestring, "CANCELED") ||
